@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '(.last_assistant_message // .\"last-assistant-message\") // empty' | /Users/cy/.claude/tts-speak.sh &",
+            "statusMessage": "Speaking response...",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

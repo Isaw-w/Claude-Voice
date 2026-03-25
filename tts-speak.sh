@@ -13,6 +13,8 @@
 # Configure your preferred voices there (e.g. Siri voices for natural TTS).
 # The system automatically picks the right voice based on text language.
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 # Kill any previous speech so responses don't overlap
 killall say 2>/dev/null
 
@@ -23,16 +25,8 @@ else
     text=$(cat)
 fi
 
-# Strip markdown formatting that sounds bad when read aloud
-text=$(echo "$text" \
-  | sed 's/```[^`]*```//g' \
-  | sed 's/`[^`]*`//g' \
-  | sed 's/^#\+//g' \
-  | sed 's/\*\*//g' \
-  | sed 's/\[[^]]*\]([^)]*)//g')
-
-# Truncate to avoid very long speeches
-text=$(echo "$text" | cut -c1-2000)
+# Strip markdown using external Python script (avoids backtick escaping issues)
+text=$(echo "$text" | python3 "$SCRIPT_DIR/tts-strip-markdown.py")
 
 # Skip if empty
 [ -z "$(echo "$text" | tr -d '[:space:]')" ] && exit 0
