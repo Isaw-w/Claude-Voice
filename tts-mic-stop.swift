@@ -1,62 +1,62 @@
-// Monitors mic input and kills 'say' when user speech is detected.
-// Requires several consecutive loud frames to avoid speaker bleed false triggers.
+// Polls mic device status. Kills afplay when mic is in use by another app.
+// No audio level detection — only checks if the input device is running.
 
-import AVFoundation
+import CoreAudio
 import Foundation
 
-let engine = AVAudioEngine()
-let inputNode = engine.inputNode
-let format = inputNode.outputFormat(forBus: 0)
-let threshold: Float = 0.05
-let requiredFrames = 5  // need 5 consecutive frames above threshold
-let gracePeriod: TimeInterval = 3.0
-let startTime = Date()
-var consecutiveCount = 0
-
-inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-    guard Date().timeIntervalSince(startTime) > gracePeriod else { return }
-
-    let channelData = buffer.floatChannelData?[0]
-    let frames = buffer.frameLength
-    var sum: Float = 0
-    for i in 0..<Int(frames) {
-        sum += abs(channelData![i])
-    }
-    let avg = sum / Float(frames)
-
-    if avg > threshold {
-        consecutiveCount += 1
-    } else {
-        consecutiveCount = 0
-    }
-
-    if consecutiveCount >= requiredFrames {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-        task.arguments = ["say"]
-        try? task.run()
-        task.waitUntilExit()
-        exit(0)
-    }
+func defaultInputDevice() -> AudioDeviceID? {
+    var deviceID = AudioDeviceID(0)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwarePropertyDefaultInputDevice,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    let status = AudioObjectGetPropertyData(
+        AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID
+    )
+    return status == noErr ? deviceID : nil
 }
 
-do {
-    try engine.start()
-} catch {
-    exit(1)
+func isMicDeviceRunning() -> Bool {
+    guard let deviceID = defaultInputDevice() else { return false }
+    var running: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    var address = AudioObjectPropertyAddress(
+        mSelector: kAudioDevicePropertyDeviceIsRunningSomewhere,
+        mScope: kAudioObjectPropertyScopeGlobal,
+        mElement: kAudioObjectPropertyElementMain
+    )
+    let status = AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &running)
+    return status == noErr && running != 0
 }
 
-Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-    let check = Process()
-    check.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-    check.arguments = ["-x", "say"]
-    check.standardOutput = FileHandle.nullDevice
-    check.standardError = FileHandle.nullDevice
-    try? check.run()
-    check.waitUntilExit()
-    if check.terminationStatus != 0 {
-        exit(0)
+func isAfplayRunning() -> Bool {
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+    task.arguments = ["-x", "afplay"]
+    task.standardOutput = FileHandle.nullDevice
+    task.standardError = FileHandle.nullDevice
+    try? task.run()
+    task.waitUntilExit()
+    return task.terminationStatus == 0
+}
+
+// Poll every 300ms
+while isAfplayRunning() {
+    if isMicDeviceRunning() {
+        // Mic is in use — stop TTS
+        let kill = Process()
+        kill.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        kill.arguments = ["afplay"]
+        try? kill.run()
+        kill.waitUntilExit()
+        // Also kill the playback loop
+        if let pidStr = try? String(contentsOfFile: "/tmp/tts-loop.pid", encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+           let pid = Int32(pidStr) {
+            Foundation.kill(pid, SIGTERM)
+        }
+        break
     }
+    Thread.sleep(forTimeInterval: 0.3)
 }
-
-RunLoop.main.run()
