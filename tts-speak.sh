@@ -1,38 +1,39 @@
 #!/bin/bash
-# Advanced TTS for AI coding assistants (Claude Code, Codex, etc.)
-# Speaks text aloud using macOS system Spoken Content voice (supports Siri natural voices).
-#
-# Usage:
-#   echo "hello" | ./tts-speak.sh          # pipe text directly
-#   ./tts-speak.sh "hello world"            # pass as argument
-#   jq -r '.message' | ./tts-speak.sh      # pipe from JSON extraction
-#
-# The voice is determined by your system settings:
-#   System Settings > Accessibility > Spoken Content > System Voice
-#
-# Configure your preferred voices there (e.g. Siri voices for natural TTS).
-# The system automatically picks the right voice based on text language.
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Kill any previous speech so responses don't overlap
-killall say 2>/dev/null
+# Kill previous TTS
+if [ -f /tmp/tts-say.pid ]; then
+    kill $(cat /tmp/tts-say.pid) 2>/dev/null
+    rm -f /tmp/tts-say.pid
+fi
 
-# Read text from argument or stdin
+# Read text
 if [ -n "$1" ]; then
     text="$*"
 else
     text=$(cat)
 fi
 
-# Strip markdown using external Python script (avoids backtick escaping issues)
+# Strip markdown
 text=$(echo "$text" | python3 "$SCRIPT_DIR/tts-strip-markdown.py")
-
-# Collapse newlines to spaces
 text=$(echo "$text" | tr '\n' ' ')
-
-# Skip if empty
 [ -z "$(echo "$text" | tr -d '[:space:]')" ] && exit 0
 
-# Speak using 'say' directly (more reliable than osascript for long text)
-echo "$text" | say &
+# Detect language
+lang=$(python3 -c "
+import sys
+text = sys.argv[1]
+cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3400' <= c <= '\u4dbf')
+print('zh' if cjk / max(len(text), 1) > 0.15 else 'en')
+" "$text")
+
+# Speak using edge-tts (Microsoft Neural voices)
+if [ "$lang" = "zh" ]; then
+    voice="zh-CN-XiaoxiaoNeural"
+else
+    voice="en-US-AvaMultilingualNeural"
+fi
+
+edge-tts --voice "$voice" --text "$text" --write-media /tmp/tts-output.mp3 2>/dev/null
+afplay /tmp/tts-output.mp3 &
+echo $! > /tmp/tts-say.pid
