@@ -1,5 +1,5 @@
-// Monitors mic input and kills 'say' when speech is detected.
-// Runs in background alongside TTS, exits when 'say' is no longer running.
+// Monitors mic input and kills 'say' when user speech is detected.
+// Requires several consecutive loud frames to avoid speaker bleed false triggers.
 
 import AVFoundation
 import Foundation
@@ -7,9 +7,15 @@ import Foundation
 let engine = AVAudioEngine()
 let inputNode = engine.inputNode
 let format = inputNode.outputFormat(forBus: 0)
-let threshold: Float = 0.02  // adjust if too sensitive or not enough
+let threshold: Float = 0.05
+let requiredFrames = 5  // need 5 consecutive frames above threshold
+let gracePeriod: TimeInterval = 3.0
+let startTime = Date()
+var consecutiveCount = 0
 
 inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+    guard Date().timeIntervalSince(startTime) > gracePeriod else { return }
+
     let channelData = buffer.floatChannelData?[0]
     let frames = buffer.frameLength
     var sum: Float = 0
@@ -17,15 +23,19 @@ inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
         sum += abs(channelData![i])
     }
     let avg = sum / Float(frames)
+
     if avg > threshold {
-        // User is speaking — kill both osascript (parent) and say (child)
-        for proc in ["osascript", "say"] {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-            task.arguments = [proc]
-            try? task.run()
-            task.waitUntilExit()
-        }
+        consecutiveCount += 1
+    } else {
+        consecutiveCount = 0
+    }
+
+    if consecutiveCount >= requiredFrames {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        task.arguments = ["say"]
+        try? task.run()
+        task.waitUntilExit()
         exit(0)
     }
 }
@@ -36,7 +46,6 @@ do {
     exit(1)
 }
 
-// Check every second if 'say' is still running; exit if not
 Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
     let check = Process()
     check.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
@@ -46,7 +55,6 @@ Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
     try? check.run()
     check.waitUntilExit()
     if check.terminationStatus != 0 {
-        // 'say' has finished, no need to monitor
         exit(0)
     }
 }
