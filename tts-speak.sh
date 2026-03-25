@@ -34,6 +34,12 @@ text=$(echo "$text" | python3 "$SCRIPT_DIR/tts-strip-markdown.py")
 # Escape double quotes for AppleScript
 text=$(echo "$text" | sed 's/"/\\"/g')
 
+# Start mic monitor first (swift takes a moment to load)
+# It will kill both osascript and say when user speaks
+if [ -f "$SCRIPT_DIR/tts-mic-stop.swift" ]; then
+    swift "$SCRIPT_DIR/tts-mic-stop.swift" &
+fi
+
 # Speak using macOS system Spoken Content voice
 # No 'using' parameter = system picks the right voice per language
 osascript -e "say \"$text\"" &
