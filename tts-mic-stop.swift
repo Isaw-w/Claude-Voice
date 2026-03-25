@@ -45,13 +45,13 @@ func isAfplayRunning() -> Bool {
 // Poll every 300ms
 while isAfplayRunning() {
     if isMicDeviceRunning() {
-        // Mic is in use — stop TTS
+        // Mic is in use — drop stop flag, kill afplay, kill loop
+        FileManager.default.createFile(atPath: "/tmp/tts-stop", contents: nil)
         let kill = Process()
         kill.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
         kill.arguments = ["afplay"]
         try? kill.run()
         kill.waitUntilExit()
-        // Also kill the playback loop
         if let pidStr = try? String(contentsOfFile: "/tmp/tts-loop.pid", encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
            let pid = Int32(pidStr) {
             Foundation.kill(pid, SIGTERM)

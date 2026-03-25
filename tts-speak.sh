@@ -57,13 +57,15 @@ for c in chunks:
 " "$text" > /tmp/tts-chunks.txt
 
 (echo $BASHPID > /tmp/tts-loop.pid
+rm -f /tmp/tts-stop
 i=0; while IFS= read -r chunk; do
+    [ -f /tmp/tts-stop ] && break
     [ -z "$chunk" ] && continue
     outfile="/tmp/tts-chunk-${i}.mp3"
     edge-tts --voice "$voice" --rate="+25%" --text "$chunk" --write-media "$outfile" 2>/dev/null
+    [ -f /tmp/tts-stop ] && rm -f "$outfile" && break
     afplay "$outfile" &
     AFPLAY_PID=$!
-    # Launch mic monitor for this chunk — kills afplay+loop when mic activates
     if [ -x "$SCRIPT_DIR/tts-mic-stop" ]; then
         "$SCRIPT_DIR/tts-mic-stop" &
     fi
@@ -71,4 +73,4 @@ i=0; while IFS= read -r chunk; do
     rm -f "$outfile"
     i=$((i + 1))
 done < /tmp/tts-chunks.txt
-rm -f /tmp/tts-chunks.txt /tmp/tts-loop.pid) &
+rm -f /tmp/tts-chunks.txt /tmp/tts-loop.pid /tmp/tts-stop) &
